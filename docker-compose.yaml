@@ -1,0 +1,12 @@
+services:
+  deadlock-discord:
+    build: .
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?Укажите DISCORD_TOKEN в .env}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      DATA_DIR: /app/data
+      TZ: ${TZ:-Europe/Kyiv}
+    volumes:
+      - ./data:/app/data
