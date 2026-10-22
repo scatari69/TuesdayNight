@@ -14,6 +14,9 @@ def new_guild():
         "votes": {}, "messages": [], "tags": 0,
         "user_tags": {}, "declines": {}, "eggs": {}, "links": {},
         "reaction_roles": {},
+        "dashboard": None,
+        "wow_characters": {},
+        "mplus_settings": None, "mplus_groups": {}, "mplus_next": 1,
     }
 
 
@@ -24,7 +27,7 @@ class Store:
         # Поврежденный файл не заменяем пустым состоянием.
         self.data = json.loads(self.path.read_text()) if self.path.exists() else {}
         if not isinstance(self.data, dict):
-            raise ValueError("Состояние должно быть JSON-объектом")
+            raise ValueError("State must be a JSON object")
 
     def _guild(self, guild_id):
         guild = self.data.setdefault(str(guild_id), new_guild())
@@ -73,10 +76,10 @@ class Store:
 def parse_time(text):
     parts = text.split(":")
     if len(parts) != 2 or not all(p.isdigit() for p in parts):
-        raise ValueError("Укажи время ЧЧ:ММ")
+        raise ValueError("Enter a time in HH:MM format")
     hour, minute = map(int, parts)
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        raise ValueError("Укажи время ЧЧ:ММ")
+        raise ValueError("Enter a time in HH:MM format")
     return f"{hour:02}:{minute:02}"
 
 

@@ -96,7 +96,7 @@ class StateTests(StateFixture):
     def test_times_and_emoji(self):
         self.assertEqual(parse_time("9:5"), "09:05")
         for invalid in ("24:00", "12:60", "abc", "12", "-1:00"):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "Enter a time in HH:MM format"):
                 parse_time(invalid)
         self.assertEqual(emoji_key(discord.PartialEmoji.from_str("<:old:123456789012345678>")),
                          emoji_key(discord.PartialEmoji.from_str("<:new:123456789012345678>")))
@@ -134,7 +134,10 @@ class BotTests(StateFixture):
     async def test_command_registration_and_persistent_buttons(self):
         names = {cmd.name for cmd in self.bot.tree.get_commands()}
         self.assertTrue({"setup", "tag", "team", "reactionrole", "link", "settings"} <= names)
-        self.assertTrue(GatheringView().is_persistent())
+        view = GatheringView()
+        self.assertTrue(view.is_persistent())
+        self.assertEqual([(button.custom_id, button.label) for button in view.children],
+                         [("deadlock:plus", "Joining"), ("deadlock:minus", "Not joining")])
 
     async def test_roster_tracks_role_changes_without_database(self):
         state = await self.store.read(1)
@@ -166,7 +169,7 @@ class BotTests(StateFixture):
 
     async def test_tag_excludes_agreed_players_and_enforces_cooldown(self):
         channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=123)))
-        self.assertEqual(await self.bot.start_gathering(self.guild, channel, self.member), "Сбор опубликован.")
+        self.assertEqual(await self.bot.start_gathering(self.guild, channel, self.member), "Gathering posted.")
         self.assertEqual(channel.send.await_count, 2)
         await self.bot.start_gathering(self.guild, channel, self.member)
         self.assertEqual(channel.send.await_count, 2)
@@ -182,7 +185,7 @@ class BotTests(StateFixture):
                                       followup=SimpleNamespace(send=AsyncMock()))
         await GatheringView().vote(interaction, "+")
         self.assertEqual((await self.store.read(1))["votes"], {})
-        self.assertIn("закрыт", interaction.followup.send.call_args.args[0])
+        self.assertIn("closed", interaction.followup.send.call_args.args[0])
 
     async def test_scheduler_resets_before_autotag_and_runs_once(self):
         channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=123)))

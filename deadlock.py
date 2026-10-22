@@ -36,7 +36,7 @@ async def api_json(url: str, params: dict = None):
                 return None
             return await r.json()
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        print(f"Ошибка запроса {url}: {e}")
+        print(f"Request failed {url}: {e}")
         return None
 
 
@@ -112,7 +112,7 @@ async def get_rank_string(account_id: int):
     if mmr and mmr[0].get("division") is not None:
         ranks = await _load_asset_names("ranks")
         div = mmr[0]["division"]
-        name = ranks.get(div, f"Ранг {div}")
+        name = ranks.get(div, f"Rank {div}")
         sub = mmr[0].get("division_tier", "")
         rank_str = f"{name} {sub}".strip()
 
@@ -157,8 +157,8 @@ async def render_deadlock_stats(account_id: int) -> str:
     )
 
     if not mmr and not steam and not recent:
-        return ("\n\n🎮 **Deadlock:** данных нет — профиль приватный "
-                "или Steam-статистика отключена.")
+        return ("\n\n🎮 **Deadlock:** no data available: the profile is private "
+                "or Steam statistics are disabled.")
 
     lines = ["\n\n🎮 **Deadlock**"]
 
@@ -167,7 +167,7 @@ async def render_deadlock_stats(account_id: int) -> str:
 
     if mmr and mmr.get("division") is not None:
         ranks = await _load_asset_names("ranks")
-        rank_name = ranks.get(mmr["division"], f"Ранг {mmr['division']}")
+        rank_name = ranks.get(mmr["division"], f"Rank {mmr['division']}")
         subrank = mmr.get("division_tier", "")
         score = mmr.get("player_score")
         line = f"🏅 {discord.utils.escape_markdown(rank_name)} {subrank}".rstrip()
@@ -179,11 +179,11 @@ async def render_deadlock_stats(account_id: int) -> str:
         heroes = await _load_asset_names("heroes")
         hero = heroes.get(recent["top_hero_id"], f"#{recent['top_hero_id']}")
         lines.append(
-            f"📈 За {recent['n']} игр: винрейт {recent['winrate']:.0f}%, "
+            f"📈 Last {recent['n']} matches: win rate {recent['winrate']:.0f}%, "
             f"KDA {recent['kills']:.1f}/{recent['deaths']:.1f}/{recent['assists']:.1f}")
-        lines.append(f"🦸 Чаще играет: {discord.utils.escape_markdown(hero)}")
+        lines.append(f"🦸 Most played hero: {discord.utils.escape_markdown(hero)}")
 
     if steam and steam.get("matches_played_last_30d") is not None:
-        lines.append(f"🗓 Матчей за 30 дней: {steam['matches_played_last_30d']}")
+        lines.append(f"🗓 Matches in the last 30 days: {steam['matches_played_last_30d']}")
 
     return "\n".join(lines)
