@@ -133,7 +133,8 @@ class BotTests(StateFixture):
 
     async def test_command_registration_and_persistent_buttons(self):
         names = {cmd.name for cmd in self.bot.tree.get_commands()}
-        self.assertTrue({"setup", "tag", "team", "reactionrole", "link", "settings"} <= names)
+        self.assertTrue({"setup", "tag", "team", "reactionrole", "mplus", "settings"} <= names)
+        self.assertFalse({"link", "character"} & names)
         view = GatheringView()
         self.assertTrue(view.is_persistent())
         self.assertEqual([(button.custom_id, button.label) for button in view.children],

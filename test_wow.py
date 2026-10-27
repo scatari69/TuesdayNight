@@ -214,13 +214,15 @@ class DashboardTests(StateFixture):
 
     async def test_old_state_defaults_and_scheduler_due_check(self):
         self.path.write_text('{"3": {"links": {"7": 123}, "tags": 4}}')
-        old = await Store(self.path).read(3)
+        restored = Store(self.path)
+        await restored.migrate()
+        old = await restored.read(3)
         self.assertIsNone(old['dashboard'])
-        self.assertEqual(old['wow_characters'], {})
+        self.assertNotIn('wow_characters', old)
         self.assertIsNone(old['mplus_settings'])
         self.assertEqual(old['mplus_groups'], {})
         self.assertEqual(old['mplus_next'], 1)
-        self.assertEqual(old['links'], {'7': 123})
+        self.assertNotIn('links', old)
         self.bot._connection._guilds = {1: self.guild}
         self.bot.queue_dashboard = MagicMock()
         await self.bot.dashboard_scheduler.coro(self.bot)

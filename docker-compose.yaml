@@ -5,14 +5,7 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?Укажите DISCORD_TOKEN в .env}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
-      STEAM_API_KEY: ${STEAM_API_KEY:-}
-      BNET_CLIENT_ID: ${BNET_CLIENT_ID:-}
-      BNET_CLIENT_SECRET: ${BNET_CLIENT_SECRET:-}
-      BNET_REDIRECT_URI: ${BNET_REDIRECT_URI:-}
-      BNET_BIND_HOST: 0.0.0.0
       DATA_DIR: /app/data
       TZ: ${TZ:-Europe/Kyiv}
     volumes:
       - ./data:/app/data
-    ports:
-      - "127.0.0.1:8080:8080"

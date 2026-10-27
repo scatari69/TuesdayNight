@@ -9,8 +9,6 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-import deadlock
-import bnet
 import mplus
 import wow
 from state import Store, eligible_members, emoji_key, parse_time, record_vote, role_is_safe
@@ -30,11 +28,10 @@ class DeadlockBot(discord.Client):
         self.wow = wow.RaiderIO()
         self.dashboard_tasks = {}
         self.dashboard_locks = {}
-        self.bnet = bnet.BattleNet(self)
         self.mplus = mplus.MPlus(self)
 
     async def setup_hook(self):
-        await self.bnet.start()
+        await self.store.migrate()
         self.add_view(GatheringView())
         self.add_view(mplus.GroupView())
         guild_id = os.getenv("DISCORD_GUILD_ID")
@@ -56,9 +53,6 @@ class DeadlockBot(discord.Client):
             task.cancel()
         await asyncio.gather(*self.dashboard_tasks.values(), return_exceptions=True)
         await self.wow.close()
-        await self.bnet.close()
-        if deadlock._http_session is not None:
-            await deadlock._http_session.close()
         await super().close()
 
     async def roster(self, guild, state):
@@ -310,79 +304,6 @@ class GatheringView(discord.ui.View):
 
 def register_commands(bot):
     mplus.register_commands(bot)
-    character = app_commands.Group(name='character', description='Link and manage your verified WoW characters', guild_only=True)
-
-    @character.command(name='link', description='Verify ownership of your WoW characters with Battle.net')
-    @app_commands.choices(region=[app_commands.Choice(name=r.upper(), value=r) for r in bnet.REGIONS])
-    async def character_link(interaction: discord.Interaction, region: str):
-        url = bot.bnet.link(interaction.guild_id, interaction.user.id, region)
-        view = discord.ui.View(timeout=600)
-        view.add_item(discord.ui.Button(label='Sign in with Battle.net', url=url))
-        await interaction.response.send_message(
-            'Sign in with Battle.net, then return here and use /character add. '
-            'This personal link expires in 10 minutes. Do not share it.', view=view, ephemeral=True)
-
-    @character.command(name='add', description='Choose a character verified by your Battle.net sign-in')
-    async def character_add(interaction: discord.Interaction, character: str):
-        await interaction.response.defer(ephemeral=True)
-        selected = await bot.bnet.add(interaction.guild_id, interaction.user.id, character)
-        await interaction.followup.send(f"Linked {wow.clean(selected['name'])} / {wow.clean(selected['realm'])}. "
-                                      'Your first character is your main. Change it with /character main.', ephemeral=True)
-
-    @character_add.autocomplete('character')
-    async def verified_choices(interaction: discord.Interaction, current: str):
-        candidates = bot.bnet.candidates(interaction.guild_id, interaction.user.id)
-        return character_choices(candidates, current)
-
-    @character.command(name='list', description='Show your linked WoW characters and main')
-    async def character_list(interaction: discord.Interaction):
-        state = await bot.store.read(interaction.guild_id)
-        roster = state['wow_characters'].get(str(interaction.user.id), {'characters': {}, 'main': None})
-        lines = [f"{'★ ' if key == roster['main'] else ''}{wow.clean(c['name'])} / {wow.clean(c['realm'])} ({c['region'].upper()})"
-                 for key, c in roster['characters'].items()]
-        await interaction.response.send_message(('\n'.join(lines) or 'No linked characters. Use /character link.')[:1900], ephemeral=True)
-
-    @character.command(name='main', description='Choose your main from your linked characters')
-    async def character_main(interaction: discord.Interaction, character: str):
-        async with bot.store.edit(interaction.guild_id) as state:
-            roster = state['wow_characters'].get(str(interaction.user.id))
-            if roster is None or character not in roster['characters']:
-                raise ValueError('Choose one of your linked characters from autocomplete.')
-            roster['main'] = character
-        await interaction.response.send_message('Main character updated.', ephemeral=True)
-
-    @character.command(name='remove', description='Unlink one of your WoW characters')
-    async def character_remove(interaction: discord.Interaction, character: str):
-        async with bot.store.edit(interaction.guild_id) as state:
-            roster = state['wow_characters'].get(str(interaction.user.id))
-            if roster is None or character not in roster['characters']:
-                raise ValueError('Choose one of your linked characters from autocomplete.')
-            del roster['characters'][character]
-            mplus.unlink_entries(state, interaction.user.id, character)
-            if roster['main'] == character:
-                roster['main'] = next(iter(roster['characters']), None)
-            if not roster['characters']:
-                del state['wow_characters'][str(interaction.user.id)]
-        bot.bnet.invalidate(interaction.guild_id, interaction.user.id)
-        await interaction.response.send_message('Character unlinked. Any remaining character is now your main if needed.', ephemeral=True)
-
-    @character_main.autocomplete('character')
-    @character_remove.autocomplete('character')
-    async def linked_choices(interaction: discord.Interaction, current: str):
-        state = await bot.store.read(interaction.guild_id)
-        roster = state['wow_characters'].get(str(interaction.user.id), {'characters': {}})
-        return character_choices(roster['characters'], current)
-
-    @character.command(name='unlink', description='Remove all your WoW links on this Discord server')
-    async def character_unlink(interaction: discord.Interaction):
-        bot.bnet.invalidate(interaction.guild_id, interaction.user.id)
-        async with bot.store.edit(interaction.guild_id) as state:
-            state['wow_characters'].pop(str(interaction.user.id), None)
-            mplus.unlink_entries(state, interaction.user.id)
-        await interaction.response.send_message('All your WoW character links on this server were removed.', ephemeral=True)
-
-    bot.tree.add_command(character)
-
     dashboard = app_commands.Group(name='dashboard', description='WoW guild dashboard',
                                   guild_only=True, default_permissions=discord.Permissions(manage_guild=True))
 
@@ -518,24 +439,7 @@ def register_commands(bot):
             lines.extend(f"<@{uid}> — {count}" for uid, count in top)
         await interaction.response.send_message("\n".join(lines))
 
-    @bot.tree.command(description="Link a Steam/tracklock profile or numeric ID; remove unlinks it")
-    @app_commands.guild_only()
-    async def link(interaction: discord.Interaction, profile: str):
-        await interaction.response.defer(ephemeral=True)
-        key = str(interaction.user.id)
-        if profile == "remove":
-            async with bot.store.edit(interaction.guild_id) as state:
-                state["links"].pop(key, None)
-            await interaction.followup.send("Profile unlinked.", ephemeral=True)
-            return
-        account, error = await deadlock.resolve_account_id(profile)
-        if error or account is None or not 0 < account < 2**32:
-            raise ValueError("Could not identify the profile. Steam /id/name links require STEAM_API_KEY.")
-        async with bot.store.edit(interaction.guild_id) as state:
-            state["links"][key] = account
-        await interaction.followup.send("Profile linked. View your stats with /me.", ephemeral=True)
-
-    @bot.tree.command(description="Your profile and Deadlock statistics")
+    @bot.tree.command(description="Your gathering statistics")
     @app_commands.guild_only()
     async def me(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -545,14 +449,6 @@ def register_commands(bot):
         lines = ["On the roster" if interaction.user.id in {m.id for m in members} else "Not on the roster",
                  f"Gatherings started: {state['user_tags'].get(key, 0)}. Off-roster attempts: {state['eggs'].get(key, 0)}.",
                  f"Declines: {state['declines'].get(key, 0)}."]
-        if key in state["links"]:
-            try:
-                lines.append(await deadlock.render_deadlock_stats(state["links"][key]))
-            except (KeyError, TypeError, ValueError):
-                log.exception("Unexpected Deadlock API response")
-                lines.append("Deadlock statistics are temporarily unavailable.")
-        else:
-            lines.append("Link your Steam profile with /link.")
         await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
 
     @bot.tree.command(description="Delete this bot's messages from the last 24 hours in this channel")
@@ -650,17 +546,6 @@ def register_commands(bot):
             await interaction.followup.send(text, ephemeral=True)
         else:
             await interaction.response.send_message(text, ephemeral=True)
-
-
-def character_choices(characters, current):
-    choices = []
-    for key, character in characters.items():
-        label = f"{character['name']} / {character['realm']} ({character['region'].upper()})"
-        if current.casefold() in label.casefold():
-            choices.append(app_commands.Choice(name=label[:100], value=key))
-            if len(choices) == 25:
-                break
-    return choices
 
 
 def main():

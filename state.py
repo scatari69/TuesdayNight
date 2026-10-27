@@ -12,10 +12,9 @@ def new_guild():
         "reset_time": "03:00", "autotag": None,
         "last_reset": None, "last_autotag": None, "last_tag": 0,
         "votes": {}, "messages": [], "tags": 0,
-        "user_tags": {}, "declines": {}, "eggs": {}, "links": {},
+        "user_tags": {}, "declines": {}, "eggs": {},
         "reaction_roles": {},
         "dashboard": None,
-        "wow_characters": {},
         "mplus_settings": None, "mplus_groups": {}, "mplus_next": 1,
     }
 
@@ -67,6 +66,23 @@ class Store:
             except BaseException:
                 self.data = before
                 raise
+
+    async def migrate(self):
+        # Старые сборы требуют привязанных персонажей; закрываем их без переноса состава.
+        for guild_id in list(self.data):
+            async with self.edit(guild_id) as state:
+                state.pop("links", None)
+                state.pop("wow_characters", None)
+                if state["mplus_settings"]:
+                    state["mplus_settings"] = {"channel_id": state["mplus_settings"]["channel_id"]}
+                for group in state["mplus_groups"].values():
+                    if group.get("version") != 2:
+                        group.update(version=2, players={}, dirty=True)
+                        if group["status"] == "open":
+                            group["status"] = "cancelled"
+                        group["revision"] += 1
+                        if group["mode"] == "learning":
+                            group["mode"] = "relaxed"
 
     async def read(self, guild_id):
         async with self.lock:
