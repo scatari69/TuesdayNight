@@ -204,7 +204,7 @@ class DashboardTests(StateFixture):
         await super().asyncSetUp()
         self.bot = DeadlockBot(self.store)
         register_commands(self.bot)
-        self.message = SimpleNamespace(id=99, edit=AsyncMock(), pin=AsyncMock())
+        self.message = SimpleNamespace(id=99, edit=AsyncMock(), pin=AsyncMock(), delete=AsyncMock())
         self.channel = SimpleNamespace(id=10, fetch_message=AsyncMock(return_value=self.message),
                                        send=AsyncMock(return_value=self.message))
         self.guild = SimpleNamespace(id=1, get_channel=lambda cid: self.channel)
@@ -222,6 +222,46 @@ class DashboardTests(StateFixture):
         self.assertIsNone((await self.store.read(2))['dashboard'])
         self.assertIsNone(restored['error'])
         self.assertFalse(self.message.edit.call_args.kwargs['allowed_mentions'].everyone)
+
+    async def test_remove_cancels_update_and_does_not_recreate_dashboard(self):
+        started = asyncio.Event()
+
+        async def scan(config):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.bot.wow.snapshot.side_effect = scan
+        async with self.store.edit(2) as state:
+            state['dashboard'] = config()
+        self.bot.queue_dashboard(self.guild)
+        task = self.bot.dashboard_tasks[1]
+        await started.wait()
+        interaction = SimpleNamespace(guild_id=1, guild=self.guild,
+            response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+        command = self.bot.tree.get_command('dashboard').get_command('remove')
+        await command.callback(interaction)
+        self.assertTrue(task.cancelled())
+        self.message.delete.assert_awaited_once()
+        self.assertIsNone((await Store(self.path).read(1))['dashboard'])
+        self.assertIsNotNone((await self.store.read(2))['dashboard'])
+        await self.bot.refresh_dashboard(self.guild)
+        self.channel.send.assert_not_awaited()
+        await command.callback(interaction)
+        self.assertEqual(self.message.delete.await_count, 1)
+
+    async def test_remove_handles_missing_message_and_permissions(self):
+        interaction = SimpleNamespace(guild_id=1, guild=self.guild,
+            response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
+        command = self.bot.tree.get_command('dashboard').get_command('remove')
+        for error in (discord.NotFound(SimpleNamespace(status=404, reason='gone'), 'gone'),
+                      discord.Forbidden(SimpleNamespace(status=403, reason='denied'), 'denied')):
+            async with self.store.edit(1) as state:
+                state['dashboard'] = config()
+            self.channel.fetch_message.side_effect = error
+            await command.callback(interaction)
+            self.assertIsNone((await self.store.read(1))['dashboard'])
+            text = interaction.followup.send.call_args.args[0]
+            self.assertEqual('Delete it manually' in text, isinstance(error, discord.Forbidden))
 
     async def test_deleted_message_is_recreated_and_id_saved(self):
         self.channel.fetch_message.side_effect = discord.NotFound(SimpleNamespace(status=404, reason='gone'), 'gone')
@@ -256,7 +296,7 @@ class DashboardTests(StateFixture):
         self.bot.refresh_dashboard.assert_awaited_once()
         group = self.bot.tree.get_command('dashboard')
         self.assertTrue(group.guild_only)
-        self.assertEqual({c.name for c in group.commands}, {'setup', 'refresh', 'status'})
+        self.assertEqual({c.name for c in group.commands}, {'setup', 'refresh', 'status', 'remove'})
         interaction = SimpleNamespace(permissions=discord.Permissions.none())
         for command in group.commands:
             with self.assertRaises(discord.app_commands.MissingPermissions):

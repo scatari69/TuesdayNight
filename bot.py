@@ -339,6 +339,33 @@ def register_commands(bot):
             await bot.publish_dashboard(interaction.guild, config)
         await interaction.followup.send(bot.queue_dashboard(interaction.guild), ephemeral=True)
 
+    @dashboard.command(name='remove', description='Disable updates and delete the dashboard message')
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def dashboard_remove(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        task = bot.dashboard_tasks.pop(interaction.guild_id, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        lock = bot.dashboard_locks.setdefault(interaction.guild_id, asyncio.Lock())
+        async with lock:
+            config = (await bot.store.read(interaction.guild_id))['dashboard']
+            async with bot.store.edit(interaction.guild_id) as state:
+                state['dashboard'] = None
+            text = 'Dashboard removed. Automatic updates are disabled.'
+            if config and config.get('message_id'):
+                channel = interaction.guild.get_channel(config['channel_id'])
+                try:
+                    if channel is None:
+                        raise ValueError('Channel unavailable')
+                    message = await channel.fetch_message(config['message_id'])
+                    await message.delete()
+                except discord.NotFound:
+                    pass
+                except (discord.HTTPException, ValueError):
+                    text = 'Automatic updates are disabled, but the message could not be deleted. Delete it manually.'
+        await interaction.followup.send(text, ephemeral=True)
+
     @dashboard.command(name='refresh', description='Queue a dashboard update using cached API data')
     @app_commands.checks.has_permissions(manage_guild=True)
     async def dashboard_refresh(interaction: discord.Interaction):
