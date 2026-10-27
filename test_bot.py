@@ -146,6 +146,18 @@ class BotTests(StateFixture):
         self.role.members = []
         self.assertEqual(await self.bot.roster(self.guild, state), [])
 
+    async def test_reaction_panel_line_breaks_and_length(self):
+        interaction = SimpleNamespace(response=SimpleNamespace(defer=AsyncMock()),
+                                      followup=SimpleNamespace(send=AsyncMock()))
+        channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(jump_url='panel', id=99)))
+        command = self.bot.tree.get_command('reactionrole').get_command('panel')
+        await command.callback(interaction, channel, r'Deadlock\nRetail\nClassic')
+        channel.send.assert_awaited_once_with('Deadlock\nRetail\nClassic')
+        channel.send.reset_mock()
+        with self.assertRaises(ValueError):
+            await command.callback(interaction, channel, 'x' * 2001)
+        channel.send.assert_not_awaited()
+
     async def test_reaction_on_uncached_message_add_remove_and_unknown(self):
         self.bot._connection.user = SimpleNamespace(id=999)
         self.bot.get_guild = lambda gid: self.guild

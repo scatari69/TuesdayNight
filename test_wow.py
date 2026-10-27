@@ -19,7 +19,7 @@ def config():
 
 def guild_data():
     return {'members': [{'character': {'name': n, 'realm': 'example-realm'}} for n in ('Alpha', 'Beta')],
-            'last_crawled_at': '2026-10-20T12:00:00Z',
+            'last_crawled_at': '2026-10-20T12:00:00Z', 'gear_cutoff': 1787112000,
             'raid_progression': {'example-raid': {'total_bosses': 8, 'mythic_bosses_killed': 3}},
             'raid_rankings': {'example-raid': {'mythic': {'realm': 4}, 'normal': {'realm': 0}}}}
 
@@ -32,13 +32,50 @@ def profile(name='Alpha', ilvl=200, score=1000, season='example-season'):
 
 
 class RenderingTests(unittest.TestCase):
+    def test_item_level_requires_gear_update_in_current_season(self):
+        profiles = [profile('Current', 200), profile('Old', 701), profile('Missing', 690),
+                    profile('Invalid', 680), profile('Future', 670)]
+        for row, date in zip(profiles[1:], ('2025-05-12T00:00:00Z', None, 'bad', '2999-01-01T00:00:00Z')):
+            row['gear']['updated_at'] = date
+        snapshot = build_snapshot(config(), guild_data(), profiles, len(profiles))
+        self.assertEqual([row['name'] for row in snapshot['ilvl']], ['Current'])
+        self.assertEqual(snapshot['ilvl_count'], 1)
+        self.assertEqual(snapshot['loaded'], 5)
+        self.assertEqual(snapshot['score_count'], 5)
+
+    def test_single_embed_with_readable_season_and_compact_top_ten(self):
+        snap = build_snapshot(config(), guild_data(),
+                              [profile(f'Player{i}', 200 + i, 1000 + i, 'season-mn-2') for i in range(10)], 10)
+        embeds = dashboard_embeds(config(), snap)
+        self.assertEqual(len(embeds), 1)
+        fields = {field.name: field for field in embeds[0].fields}
+        for title in ('Top item level', 'Top Mythic+ • Midnight Season 2'):
+            self.assertTrue(fields[title].inline)
+            self.assertIn('10. [Player0]', fields[title].value)
+        self.assertNotIn('season-mn-2', str(embeds[0].to_dict()))
+        snap['season'] = 'unknown-season'
+        self.assertIn('Top Mythic+ • unknown-season', str(dashboard_embeds(config(), snap)[0].to_dict()))
+
+    def test_multiple_raids_compact_heroic_and_mythic_only(self):
+        guild = guild_data()
+        guild['raid_progression']['example-raid']['heroic_bosses_killed'] = 8
+        guild['raid_progression']['second-raid'] = {'total_bosses': 1, 'heroic_bosses_killed': 1,
+                                                   'mythic_bosses_killed': 0, 'normal_bosses_killed': 1}
+        guild['raid_names'] = {'example-raid': 'The Venomous Abyss', 'second-raid': "The Unbinding of Kith'ix"}
+        snapshot = build_snapshot(config(), guild, [], 0)
+        fields = {field.name: field.value for field in dashboard_embeds(config(), snapshot)[0].fields}
+        self.assertEqual(fields['Raid progression'],
+                         "The Venomous Abyss: 8/8H 3/8M\nThe Unbinding of Kith'ix: 1/1H 0/1M")
+        self.assertNotIn('Normal', str(fields))
+        self.assertNotIn('Realm rank', str(fields))
+
     def test_top_order_progress_and_partial_data(self):
         snap = build_snapshot(config(), guild_data(), [profile(), profile('Beta', 220, 900)], 3)
         self.assertEqual([p['name'] for p in snap['ilvl']], ['Beta', 'Alpha'])
         self.assertEqual([p['name'] for p in snap['scores']], ['Alpha', 'Beta'])
         embeds = dashboard_embeds(config(), snap)
         text = str([e.to_dict() for e in embeds])
-        for expected in ('Partial data', '2/3', '#4', '3/8', 'Unranked', 'Unavailable', '2026-10-19', 'raider.io'):
+        for expected in ('Partial data', '2/3', '3/8M', '?H', '2026-10-19', 'raider.io'):
             self.assertIn(expected, text)
 
     def test_mixed_seasons_missing_values_and_invalid_numbers(self):
@@ -59,6 +96,8 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(len(snap['ilvl']), 10)
         embeds = dashboard_embeds(config(), snap, 'API unavailable')
         self.assertLessEqual(sum(len(e) for e in embeds), 6000)
+        self.assertEqual(len(embeds), 1)
+        self.assertTrue(all(len(field.value) <= 1024 for field in embeds[0].fields))
         self.assertTrue(all(len(e.description or '') <= 4096 for e in embeds))
         self.assertIn('Stale', str(embeds[0].to_dict()))
         self.assertNotIn('@everyone', str([e.to_dict() for e in embeds]))
@@ -66,6 +105,34 @@ class RenderingTests(unittest.TestCase):
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_guild_filters_old_and_future_raids_by_regional_dates(self):
+        client = RaiderIO()
+        raids = [{'slug': slug, 'name': slug.title(),
+                  'starts': {'eu': start, 'us': '2000-01-01T00:00:00Z'},
+                  'ends': {'eu': end, 'us': '2001-01-01T00:00:00Z'}}
+                 for slug, start, end in (
+                     ('example-raid', '2000-01-01T00:00:00Z', '2999-01-01T00:00:00Z'),
+                     ('second-raid', '2000-01-01T00:00:00Z', '2999-01-01T00:00:00Z'),
+                     ('old-raid', '2000-01-01T00:00:00Z', '2001-01-01T00:00:00Z'),
+                     ('future-raid', '2998-01-01T00:00:00Z', '2999-01-01T00:00:00Z'))]
+        guild = guild_data()
+        for slug in ('second-raid', 'old-raid', 'future-raid'):
+            guild['raid_progression'][slug] = {'total_bosses': 1}
+        client.get = AsyncMock(side_effect=[{'raids': raids}, {'seasons': [
+            {'is_main_season': True, 'starts': {'eu': '2000-01-01T00:00:00Z'},
+             'ends': {'eu': '2999-01-01T00:00:00Z'}}]}, guild])
+        result = await client.guild(config())
+        self.assertEqual(set(result['raid_progression']), {'example-raid', 'second-raid'})
+        self.assertEqual(result['raid_names']['example-raid'], 'Example-Raid')
+        self.assertIn('old-raid', guild['raid_progression'])
+        client.get.assert_any_await('raiding/static-data', {'expansion_id': 11}, ttl=3600)
+        client.get = AsyncMock(return_value={'raids': [{'slug': 'broken'}]})
+        with self.assertRaisesRegex(APIError, 'invalid raid dates'):
+            await client.guild(config())
+        client.get = AsyncMock(return_value={'raids': []})
+        with self.assertRaisesRegex(APIError, 'active raids'):
+            await client.guild(config())
+
     def client(self, status=200, payload=None, headers=None):
         client = RaiderIO()
         response = SimpleNamespace(status=status, headers=headers or {}, json=AsyncMock(return_value=payload))

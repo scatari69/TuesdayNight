@@ -8,6 +8,8 @@ import aiohttp
 import discord
 
 REFRESH_SECONDS = 1800
+# shortcut: Midnight; обновить ID при выходе следующего дополнения.
+EXPANSION_ID = 11
 
 
 class APIError(ValueError):
@@ -69,10 +71,34 @@ class RaiderIO:
             return data
 
     async def guild(self, config):
-        return await self.get('guilds/profile', {
+        metadata = await self.get('raiding/static-data', {'expansion_id': EXPANSION_ID}, ttl=3600)
+        try:
+            now = datetime.now(timezone.utc)
+            raids = {raid['slug']: raid['name'] for raid in metadata['raids']
+                     if datetime.fromisoformat(raid['starts'][config['region']].replace('Z', '+00:00')) <= now
+                     < datetime.fromisoformat(raid['ends'][config['region']].replace('Z', '+00:00'))}
+        except (KeyError, TypeError, ValueError) as error:
+            raise APIError('Raider.IO returned invalid raid dates.') from error
+        if not raids:
+            raise APIError('Raider.IO did not return any active raids.')
+        seasons = await self.get('mythic-plus/static-data', {'expansion_id': EXPANSION_ID}, ttl=3600)
+        try:
+            active = [s for s in seasons['seasons'] if s['is_main_season']
+                      and datetime.fromisoformat(s['starts'][config['region']].replace('Z', '+00:00')) <= now
+                      < datetime.fromisoformat(s['ends'][config['region']].replace('Z', '+00:00'))]
+            gear_cutoff = max(datetime.fromisoformat(s['starts'][config['region']].replace('Z', '+00:00'))
+                              for s in active).timestamp()
+        except (KeyError, TypeError, ValueError) as error:
+            raise APIError('Raider.IO did not return valid current season dates.') from error
+        guild = await self.get('guilds/profile', {
             'region': config['region'], 'realm': config['realm'], 'name': config['name'],
-            'fields': 'members,raid_progression:current-tier,raid_rankings:current-tier',
+            'fields': 'members,raid_progression:current-expansion,raid_rankings:current-expansion',
         }, ttl=3600)
+        if not isinstance(guild.get('raid_progression'), dict):
+            raise APIError('Raider.IO did not return raid data.')
+        return {**guild, 'raid_names': raids, 'gear_cutoff': gear_cutoff,
+                'raid_progression': {slug: value for slug, value in guild.get('raid_progression', {}).items()
+                                     if slug in raids}}
 
     async def snapshot(self, config):
         guild = await self.guild(config)
@@ -117,6 +143,13 @@ def build_snapshot(config, guild, profiles, total):
                    'crawled': p.get('last_crawled_at'),
                    'gear_updated': (p.get('gear') or {}).get('updated_at'),
                    'ilvl': (p.get('gear') or {}).get('item_level_equipped'), 'score': None}
+            # Дата обхода профиля не подтверждает обновление экипировки после сквиша.
+            try:
+                gear_date = datetime.fromisoformat(row['gear_updated'].replace('Z', '+00:00'))
+                if not gear_date.tzinfo or not guild['gear_cutoff'] <= gear_date.timestamp() <= time.time():
+                    row['ilvl'] = None
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+                row['ilvl'] = None
             scores = p.get('mythic_plus_scores_by_season') or []
             if scores and isinstance(scores[0].get('season'), str):
                 row['season'] = scores[0]['season']
@@ -141,6 +174,7 @@ def build_snapshot(config, guild, profiles, total):
             'ilvl_count': len(ilvl), 'score_count': len(scores), 'season': season,
             'ilvl': ilvl[:10], 'scores': scores[:10],
             'progress': progress, 'rankings': rankings,
+            'raid_names': guild.get('raid_names', {}),
             'guild_crawled': guild.get('last_crawled_at')}
 
 
@@ -158,44 +192,38 @@ def dashboard_embeds(config, snapshot, error=None):
         main.add_field(name='Data status', value='Waiting for the first successful update.', inline=False)
         return [main]
     main.timestamp = datetime.fromtimestamp(snapshot['updated'], timezone.utc)
-    main.set_footer(text='Last dashboard scan • Source snapshots may be older')
+    main.set_footer(text='Last scan • Source snapshots may be older • Guild: ' +
+                         str(snapshot.get('guild_crawled') or 'Unknown')[:80])
     main.add_field(name='Data status', value=(
         f"Profiles: {snapshot['loaded']}/{snapshot['total']} • "
-        f"ilvl: {snapshot['ilvl_count']} • M+: {snapshot['score_count']}\n"
-        f"{'Partial data' if min(snapshot['loaded'], snapshot['ilvl_count'], snapshot['score_count']) < snapshot['total'] else 'Complete scan'}\n"
-        f"Guild source: {clean(snapshot.get('guild_crawled') or 'Unknown')[:80]}"), inline=False)
+        f"ilvl: {snapshot['ilvl_count']} • M+: {snapshot['score_count']} • "
+        f"{'Partial data' if min(snapshot['loaded'], snapshot['ilvl_count'], snapshot['score_count']) < snapshot['total'] else 'Complete scan'}"), inline=False)
     progress = snapshot['progress']
-    for raid in sorted(set(progress) | set(snapshot['rankings']))[:8]:
-        p = progress.get(raid, {})
-        lines = []
-        for difficulty in ('normal', 'heroic', 'mythic'):
-            rank = snapshot['rankings'].get(raid, {}).get(difficulty, {}).get('realm')
-            rank_text = f'#{rank}' if number(rank) and rank > 0 else 'Unranked' if rank == 0 else 'Unavailable'
+    lines = []
+    for raid, p in sorted(progress.items()):
+        counts = []
+        for difficulty, suffix in (('heroic', 'H'), ('mythic', 'M')):
             killed, total = p.get(difficulty + '_bosses_killed'), p.get('total_bosses')
-            count = f'{killed}/{total}' if number(killed) and number(total) else 'Unavailable'
-            lines.append(f'{difficulty.title()}: {count} • Realm rank: {rank_text}')
-        main.add_field(name=clean(raid)[:256], value='\n'.join(lines), inline=False)
-    if not progress and not snapshot['rankings']:
-        main.add_field(name='Raid progression', value='Unavailable', inline=False)
-    embeds = [main]
-    for title, key, metric in [('Top equipped item level', 'ilvl', 'ilvl'),
-                                ('Top Mythic+ • ' + (snapshot['season'] or 'Season unavailable'), 'scores', 'score')]:
+            counts.append(f'{killed}/{total}{suffix}' if number(killed) and number(total) else f'?{suffix}')
+        name = snapshot.get('raid_names', {}).get(raid, raid.replace('-', ' ').title())
+        lines.append(f"{clean(name)[:150]}: {' '.join(counts)}")
+    main.add_field(name='Raid progression', value='\n'.join(lines)[:1024] or 'Unavailable', inline=False)
+    season = snapshot['season'] or 'Season unavailable'
+    if season.startswith('season-mn-') and season.removeprefix('season-mn-').isdigit():
+        season = 'Midnight Season ' + season.removeprefix('season-mn-')
+    for title, key, metric in [('Top item level', 'ilvl', 'ilvl'),
+                                ('Top Mythic+ • ' + season, 'scores', 'score')]:
         lines = []
         for i, row in enumerate(snapshot[key], 1):
             link = profile_url(config['region'], row['realm'], row['name'])
-            lines.append(f"{i}. [{clean(row['name'])}]({link}) — **{row[metric]:g}**\n"
-                         f"{clean(row['class'])} • {clean(row['realm'])}")
-        embed = discord.Embed(title=title[:256], description='\n'.join(lines)[:4096] or 'No verified data.', color=0x5865F2)
+            lines.append(f"{i}. [{clean(row['name'])}]({link}) **{row[metric]:g}**")
         dates = [r.get('gear_updated' if key == 'ilvl' else 'crawled') for r in snapshot[key]]
         known = [d for d in dates if isinstance(d, str)]
-        embed.set_footer(text=('Oldest listed source: ' + min(known)[:80] if known else 'Source date: Unknown') +
-                         (' • Some dates unknown' if len(known) < len(dates) else ''))
-        embeds.append(embed)
-    # Лимит 6000 символов общий для всех embeds сообщения.
-    while len(main) > 3000 and len(main.fields) > 1:
-        main.remove_field(len(main.fields) - 1)
-    budget = max(100, (5900 - len(main) - sum(len(e.title or '') + len(e.footer.text or '') for e in embeds[1:])) // 2)
-    for embed in embeds[1:]:
-        if len(embed.description) > budget:
-            embed.description = embed.description[:budget - 30].rsplit('\n', 1)[0] + '\n… See Raider.IO for more.'
-    return embeds
+        source = ('Source: ' + min(known)[:10] if known else 'Source: Unknown')
+        if len(known) < len(dates):
+            source += ' • Some dates unknown'
+        value = '\n'.join(lines) or 'No verified data.'
+        if len(value) + len(source) + 1 > 1024:
+            value = value[:1024 - len(source) - 40].rsplit('\n', 1)[0] + '\n… See Raider.IO for more.'
+        main.add_field(name=clean(title)[:256], value=value + '\n' + source, inline=True)
+    return [main]

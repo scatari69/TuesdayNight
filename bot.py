@@ -501,6 +501,7 @@ def register_commands(bot):
     @app_commands.checks.has_permissions(manage_roles=True)
     async def reaction_panel(interaction: discord.Interaction, channel: discord.TextChannel, text: str):
         await interaction.response.defer(ephemeral=True)
+        text = text.replace("\\n", "\n")
         if not 1 <= len(text) <= 2000:
             raise ValueError("Panel text must contain between 1 and 2000 characters.")
         message = await channel.send(text)
