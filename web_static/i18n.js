@@ -32,7 +32,6 @@
   "↻ Обновить": "↻ Refresh",
   "Результат": "Result",
   "Очистить": "Clear",
-  "Сборы, которые случаются.": "Gatherings that happen.",
   "ПОДТВЕРЖДЕНИЕ": "CONFIRMATION",
   "Выполнить действие?": "Run this action?",
   "Отмена": "Cancel",
