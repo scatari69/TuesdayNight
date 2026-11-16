@@ -70,10 +70,12 @@ class WebTests(StateFixture):
         self.assertEqual(response.status, 200)
         html = await response.text()
         self.assertIn('/app.js', html)
+        self.assertIn('/i18n.js', html)
+        self.assertIn('lang="ru"', html)
         self.assertIn('/style.css', html)
         self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
-        for asset in ('app.js', 'style.css'):
+        for asset in ('app.js', 'style.css', 'i18n.js'):
             response = await self.client.get('/' + asset)
             self.assertEqual(response.status, 200)
             self.assertTrue(await response.text())

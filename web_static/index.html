@@ -6,42 +6,43 @@
   <meta name="color-scheme" content="dark">
   <title>TuesdayNight — панель бота</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">К содержимому</a>
+  <a class="skip-link" href="#main" data-i18n="К содержимому">К содержимому</a>
   <div class="app-shell">
-    <aside class="sidebar" aria-label="Навигация">
-      <a class="brand" href="/" aria-label="TuesdayNight, главная"><span class="brand-icon" aria-hidden="true">t.</span><span>TuesdayNight<small>ПАНЕЛЬ УПРАВЛЕНИЯ</small></span></a>
+    <aside class="sidebar" aria-label="Навигация" data-i18n-aria-label="Навигация">
+      <a class="brand" href="/" aria-label="TuesdayNight, главная" data-i18n-aria-label="TuesdayNight, главная"><span class="brand-icon" aria-hidden="true">t.</span><span>TuesdayNight<small data-i18n="ПАНЕЛЬ УПРАВЛЕНИЯ">ПАНЕЛЬ УПРАВЛЕНИЯ</small></span></a>
       <div class="server-picker" id="server-picker" hidden>
-        <label for="guild-select">DISCORD-СЕРВЕР</label>
-        <select id="guild-select" aria-label="Выбрать Discord-сервер"></select>
+        <label for="guild-select" data-i18n="DISCORD-СЕРВЕР">DISCORD-СЕРВЕР</label>
+        <select id="guild-select" aria-label="Выбрать Discord-сервер" data-i18n-aria-label="Выбрать Discord-сервер"></select>
       </div>
-      <nav id="navigation" aria-label="Разделы" hidden></nav>
-      <div class="sidebar-bottom"><span class="status-dot" aria-hidden="true"></span>Всё начинается со сбора<small>Один бот. Все ваши игры.</small></div>
+      <nav id="navigation" aria-label="Разделы" data-i18n-aria-label="Разделы" hidden></nav>
+      <div class="sidebar-bottom"><span class="status-dot" aria-hidden="true"></span><span data-i18n="Всё начинается со сбора">Всё начинается со сбора</span><small data-i18n="Один бот. Все ваши игры.">Один бот. Все ваши игры.</small></div>
     </aside>
     <div class="workspace">
-      <header class="topbar"><span class="topbar-label">ВАШ ИГРОВОЙ ШТАБ</span><div id="account"><a class="button button-small" href="/auth/login">Войти через Discord</a></div></header>
+      <header class="topbar"><span class="topbar-label" data-i18n="ВАШ ИГРОВОЙ ШТАБ">ВАШ ИГРОВОЙ ШТАБ</span><div class="topbar-controls"><label class="language-picker"><span class="sr-only" data-i18n="Язык интерфейса">Язык интерфейса</span><select id="language-select" aria-label="Язык интерфейса" data-i18n-aria-label="Язык интерфейса"><option value="ru">RU</option><option value="en">EN</option></select></label><div id="account"><a class="button button-small" href="/auth/login" data-i18n="Войти через Discord">Войти через Discord</a></div></div></header>
       <main id="main" tabindex="-1">
         <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
         <section id="welcome" class="welcome">
           <span class="eyebrow">TUESDAYNIGHT / CONTROL ROOM</span>
-          <h1>Собирайте команду.<br><span>Остальное — здесь.</span></h1>
-          <p>Сборы Deadlock, роли по реакциям, прогресс гильдии и группы Mythic+ — в одной панели.</p>
-          <a class="button" href="/auth/login">Войти через Discord <span aria-hidden="true">↗</span></a>
-          <div class="welcome-features"><span>01 &nbsp; Ваши серверы</span><span>02 &nbsp; Ваши права Discord</span><span>03 &nbsp; Все команды бота</span></div>
+          <h1><span data-i18n="Собирайте команду." class="welcome-primary">Собирайте команду.</span><br><span data-i18n="Остальное — здесь.">Остальное — здесь.</span></h1>
+          <p data-i18n="Сборы Deadlock, роли по реакциям, прогресс гильдии и группы Mythic+ — в одной панели.">Сборы Deadlock, роли по реакциям, прогресс гильдии и группы Mythic+ — в одной панели.</p>
+          <a class="button" href="/auth/login"><span data-i18n="Войти через Discord">Войти через Discord</span> <span aria-hidden="true">↗</span></a>
+          <div class="welcome-features"><span data-i18n="01   Ваши серверы">01   Ваши серверы</span><span data-i18n="02   Ваши права Discord">02   Ваши права Discord</span><span data-i18n="03   Все команды бота">03   Все команды бота</span></div>
         </section>
         <section id="dashboard" hidden>
-          <div class="page-heading"><div><span class="eyebrow" id="page-eyebrow">ОБЗОР СЕРВЕРА</span><h1 id="page-title">Панель управления</h1><p id="page-description"></p></div><button id="refresh" class="button button-secondary button-small" type="button">↻ Обновить</button></div>
+          <div class="page-heading"><div><span class="eyebrow" id="page-eyebrow" data-i18n="ОБЗОР СЕРВЕРА">ОБЗОР СЕРВЕРА</span><h1 id="page-title" data-i18n="Панель управления">Панель управления</h1><p id="page-description"></p></div><button id="refresh" class="button button-secondary button-small" type="button" data-i18n="↻ Обновить">↻ Обновить</button></div>
           <div id="summary" class="summary-grid"></div>
           <div id="overview"></div>
           <div id="command-area" class="command-grid"></div>
-          <section id="results-section" class="results-panel" hidden aria-labelledby="results-heading"><div class="section-heading"><h2 id="results-heading">Результат</h2><button id="clear-results" class="text-button" type="button">Очистить</button></div><div id="results" role="status" aria-live="polite"></div></section>
+          <section id="results-section" class="results-panel" hidden aria-labelledby="results-heading"><div class="section-heading"><h2 id="results-heading" data-i18n="Результат">Результат</h2><button id="clear-results" class="text-button" type="button" data-i18n="Очистить">Очистить</button></div><div id="results" role="status" aria-live="polite"></div></section>
         </section>
       </main>
-      <footer>TuesdayNight <span>Сборы, которые случаются.</span></footer>
+      <footer>TuesdayNight <span data-i18n="Сборы, которые случаются.">Сборы, которые случаются.</span></footer>
     </div>
   </div>
-  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog"><span class="eyebrow">ПОДТВЕРЖДЕНИЕ</span><h2 id="confirm-title">Выполнить действие?</h2><p id="confirm-text"></p><div class="dialog-actions"><button class="button button-secondary" value="cancel">Отмена</button><button class="button button-danger" value="confirm">Подтвердить</button></div></form></dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog"><span class="eyebrow" data-i18n="ПОДТВЕРЖДЕНИЕ">ПОДТВЕРЖДЕНИЕ</span><h2 id="confirm-title" data-i18n="Выполнить действие?">Выполнить действие?</h2><p id="confirm-text"></p><div class="dialog-actions"><button class="button button-secondary" value="cancel" data-i18n="Отмена">Отмена</button><button class="button button-danger" value="confirm" data-i18n="Подтвердить">Подтвердить</button></div></form></dialog>
 </body>
 </html>

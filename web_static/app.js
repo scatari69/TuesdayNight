@@ -1,6 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
+const {t, translateError, dateLocale, applyStatic, getLanguage, setLanguage} = window.I18n;
 const sections = {
   overview: {name: 'Обзор', icon: '◈', title: 'Всё под контролем', description: 'Ваш сервер, настройки и ближайшие игровые сборы.'},
   deadlock: {name: 'Deadlock', icon: '↗', title: 'Время собираться', description: 'Пригласите игроков, настройте расписание и посмотрите статистику.'},
@@ -38,7 +39,7 @@ const commandsText = {
 };
 const fieldNames = {role:'Роль игроков',channel:'Канал',cooldown:'Задержка между приглашениями, сек.',reset_time:'Ежедневный сброс',autotag:'Автосбор',message_id:'ID сообщения панели',emoji:'Эмодзи',text:'Текст панели',region:'Регион',realm:'Сервер WoW',guild_name:'Название гильдии',dungeon:'Подземелье',level:'Уровень ключа',start:'Начало сбора',mode:'Цель группы',group:'Группа',member:'Участник'};
 const destructive = {clear:'Голоса будут сброшены, текущие сборы закрыты.',cleanup:'Будут удалены сообщения бота за последние 24 часа в выбранном канале, включая панели ролей.', 'dashboard remove':'Дашборд будет отключён, а его сообщение удалено.', 'mplus cancel':'Сбор будет отменён. Запись в группу закроется.', 'mplus kick':'Участник будет исключён из группы.', 'reactionrole remove':'Привязка реакции будет удалена. Уже выданные роли останутся у участников.', 'mplus start':'Запись будет закрыта, а группа отмечена как начавшая забег.', 'mplus transfer':'Лидерство перейдёт выбранному участнику.', 'mplus leave':'Вы выйдете из группы. Если вы лидер, сбор будет отменён.'};
-let identity, guildData, section = 'overview', loading = false, executing = false;
+let identity, guildData, section = 'overview', loading = false, executing = false, playerCounter = 0;
 
 function node(tag, className, text) {
   const item = document.createElement(tag);
@@ -46,8 +47,16 @@ function node(tag, className, text) {
   if (text !== undefined) item.textContent = String(text);
   return item;
 }
+function ui(tag, className, text) { return node(tag, className, t(text)); }
+let noticeSource = '';
+function feedback(el, text, error = false) {
+  el.dataset.source = text;
+  el.className = error ? 'form-feedback error' : 'form-feedback';
+  el.textContent = translateError(text);
+}
 function notice(text, error = false) {
-  $('notice').textContent = text;
+  noticeSource = text;
+  $('notice').textContent = translateError(text);
   $('notice').className = error ? 'notice error' : 'notice';
   $('notice').hidden = !text;
 }
@@ -66,6 +75,8 @@ async function api(path, options = {}) {
   }
   return data;
 }
+function groupMode(value) { return t({push:'Пуш',relaxed:'Без спешки',carry:'Помощь'}[value] || value); }
+function groupStatus(value) { return t({open:'Открыта',started:'Начата',cancelled:'Отменена',expired:'Истекла'}[value] || value); }
 function commandSection(name) {
   if (name === 'cleanup') return 'tools';
   const prefix = name.split(' ')[0];
@@ -77,7 +88,7 @@ function option(value, text) {
   return result;
 }
 function channelOptions(select, selected) {
-  select.replaceChildren(option('', 'Выберите канал'));
+  select.replaceChildren(option('', t('Выберите канал')));
   for (const channel of guildData.channels || []) select.append(option(channel.id, '#' + channel.name));
   if (selected) select.value = String(selected);
 }
@@ -89,7 +100,7 @@ function renderNavigation() {
     button.type = 'button';
     button.disabled = executing;
     button.setAttribute('aria-current', key === section ? 'page' : 'false');
-    button.append(node('span', 'nav-icon', details.icon), node('span', '', details.name));
+    button.append(node('span', 'nav-icon', details.icon), ui('span', '', details.name));
     if (key !== 'overview') button.append(node('span', 'nav-count', (guildData.commands || []).filter((c) => commandSection(c.name) === key).length));
     button.addEventListener('click', () => {section = key; renderPage();});
     nav.append(button);
@@ -101,27 +112,27 @@ function renderSummary() {
   const groups = Object.values(state.mplus_groups || {}).filter((g) => g.status === 'open');
   const labels = [
     ['Сервер', guildData.guild.name, 'Discord'],
-    ['Сборы Deadlock', state.tags ?? '—', state.role_id ? 'Роль игроков настроена' : 'Роль ещё не выбрана'],
-    ['Группы Mythic+', groups.length, 'Открыто для записи'],
-    ['WoW-дашборд', state.dashboard ? 'Подключён' : 'Не настроен', state.dashboard?.name || 'Данные Raider.IO']
+    ['Сборы Deadlock', state.tags ?? '—', t(state.role_id ? 'Роль игроков настроена' : 'Роль ещё не выбрана')],
+    ['Группы Mythic+', groups.length, t('Открыто для записи')],
+    ['WoW-дашборд', t(state.dashboard ? 'Подключён' : 'Не настроен'), state.dashboard?.name || t('Данные Raider.IO')]
   ];
   $('summary').replaceChildren(...labels.map(([label,value,detail]) => {
     const card = node('div', 'summary-card');
-    card.append(node('span','summary-label',label),node('strong','summary-value',value),node('span','summary-note',detail));
+    card.append(ui('span','summary-label',label),node('strong','summary-value',value),node('span','summary-note',detail));
     return card;
   }));
 }
 function displayChoice(items, id, prefix = '') {
   const item = (items || []).find((entry) => String(entry.id) === String(id));
-  return item ? prefix + item.name : id ? String(id) : 'Не настроено';
+  return item ? prefix + item.name : id ? String(id) : t('Не настроено');
 }
 function overviewCard(title, entries) {
   const card = node('section','overview-card');
-  card.append(node('h2','',title));
+  card.append(ui('h2','',title));
   const list = node('dl');
   for (const [key,value] of entries) {
     const row = node('div','key-value');
-    row.append(node('dt','',key),node('dd','',value));
+    row.append(ui('dt','',key),node('dd','',value));
     list.append(row);
   }
   card.append(list);
@@ -133,50 +144,50 @@ function renderOverview() {
   wrapper.append(overviewCard('Сборы Deadlock', [
     ['Роль игроков', displayChoice(guildData.roles,state.role_id,'@')],
     ['Канал', displayChoice(guildData.channels,state.channel_id,'#')],
-    ['Автосбор', state.autotag || 'Выключен'], ['Сброс голосов', state.reset_time || '—'],
-    ['Задержка', `${state.cooldown ?? '—'} сек.`]
+    ['Автосбор', state.autotag || t('Выключен')], ['Сброс голосов', state.reset_time || '—'],
+    ['Задержка', `${state.cooldown ?? '—'} ${t('сек.')}`]
   ]));
   const groupsCard = node('section','overview-card');
-  groupsCard.append(node('h2','','Открытые группы Mythic+'));
+  groupsCard.append(ui('h2','','Открытые группы Mythic+'));
   const groups = Object.entries(state.mplus_groups || {}).filter(([,g]) => g.status === 'open');
-  if (!groups.length) groupsCard.append(node('p','empty-state','Пока нет открытых групп. Создайте первую в разделе Mythic+.'));
+  if (!groups.length) groupsCard.append(ui('p','empty-state','Пока нет открытых групп. Создайте первую в разделе Mythic+.'));
   for (const [id,group] of groups) {
     const row = node('div','group-row'), detail = node('div');
     const date = new Date(group.start * 1000);
-    detail.append(node('strong','',`#${id} · ${group.dungeon} +${group.level}`), node('small','',`${Number.isNaN(date.getTime()) ? 'Время не указано' : date.toLocaleString('ru-RU')} · ${group.mode}`));
+    detail.append(node('strong','',`#${id} · ${group.dungeon} +${group.level}`), node('small','',`${Number.isNaN(date.getTime()) ? t('Время не указано') : date.toLocaleString(dateLocale())} · ${groupMode(group.mode)}`));
     row.append(detail,node('span','badge',`${Object.keys(group.players || {}).length}/5`));
     groupsCard.append(row);
   }
   wrapper.append(groupsCard);
   const dashboard = state.dashboard;
-  const wowCard = overviewCard('WoW-гильдия', [['Гильдия',dashboard?.name || 'Не настроена'],['Сервер',dashboard ? `${String(dashboard.region).toUpperCase()} / ${dashboard.realm}` : '—'],['Последняя ошибка',dashboard?.error || 'Нет']]);
+  const wowCard = overviewCard('WoW-гильдия', [['Гильдия',dashboard?.name || t('Не настроена')],['Сервер',dashboard ? `${String(dashboard.region).toUpperCase()} / ${dashboard.realm}` : '—'],['Последняя ошибка',dashboard?.error || t('Нет')]]);
   wrapper.append(wowCard);
   const roleCount = Object.values(state.reaction_roles || {}).reduce((count, panel) => count + Object.keys(panel.roles || {}).length, 0);
-  wrapper.append(overviewCard('Роли по реакциям', [['Панелей',Object.keys(state.reaction_roles || {}).length],['Привязок',roleCount],['Как работает','Реакция выдаёт роль, снятие забирает']]));
+  wrapper.append(overviewCard('Роли по реакциям', [['Панелей',Object.keys(state.reaction_roles || {}).length],['Привязок',roleCount],['Как работает',t('Реакция выдаёт роль, снятие забирает')]]));
   $('overview').replaceChildren(wrapper);
 }
 function buildField(parameter, command, index) {
   const label = node('label','field');
-  const caption = node('span','field-label',fieldNames[parameter.name] || parameter.name);
-  if (!parameter.required) caption.append(node('span','optional',' · необязательно'));
+  const caption = ui('span','field-label',fieldNames[parameter.name] || parameter.name);
+  if (!parameter.required) caption.append(ui('span','optional',' · необязательно'));
   label.append(caption);
   let input;
   const listTypes = {channel: guildData.channels, role:guildData.roles, user:guildData.members};
   if (parameter.choices?.length || Object.hasOwn(listTypes, parameter.type) || parameter.type === 'boolean' || parameter.name === 'group') {
     input = node('select');
-    input.append(option('',parameter.required ? 'Выберите…' : 'Не менять / не указывать'));
-    if (parameter.choices?.length) for (const choice of parameter.choices) input.append(option(choice.value,choice.name));
-    else if (parameter.type === 'boolean') input.append(option('true','Да'),option('false','Нет'));
+    input.append(option('',t(parameter.required ? 'Выберите…' : 'Не менять / не указывать')));
+    if (parameter.choices?.length) for (const choice of parameter.choices) input.append(option(choice.value, parameter.name === 'mode' ? groupMode(choice.value) : choice.name));
+    else if (parameter.type === 'boolean') input.append(option('true',t('Да')),option('false',t('Нет')));
     else if (parameter.name === 'group') for (const [id,group] of Object.entries(guildData.state?.mplus_groups || {})) {
       if (command.name !== 'mplus show' && group.status !== 'open') continue;
-      input.append(option(id,`#${id} · +${group.level} ${group.dungeon} · ${group.status}`));
+      input.append(option(id,`#${id} · +${group.level} ${group.dungeon} · ${groupStatus(group.status)}`));
     }
     else for (const item of listTypes[parameter.type] || []) input.append(option(item.id,(parameter.type === 'channel' ? '#' : parameter.type === 'role' ? '@' : '') + item.name));
     if (!input.options.length || input.options.length === 1) input.setAttribute('data-empty-options','true');
   } else if (parameter.name === 'text') {
     input = node('textarea');
     input.rows = 5;
-    input.placeholder = '🎮 Выберите свои игры\n🔫 — Deadlock\n🐉 — WoW Retail';
+    input.placeholder = t('🎮 Выберите свои игры\n🔫 — Deadlock\n🐉 — WoW Retail');
   } else {
     input = node('input');
     input.type = ['integer','number'].includes(parameter.type) ? 'number' : 'text';
@@ -198,12 +209,12 @@ function buildField(parameter, command, index) {
   }
   const help = {start:'Дата, время и часовой пояс: 2026-11-20T20:00+02:00. В ближайшие 30 дней.',autotag:'HH:MM или disable, чтобы выключить.',reset_time:'Формат HH:MM, например 03:00.',message_id:'ID сообщения бота из ответа на создание панели.',emoji:'Обычный эмодзи или серверный в формате <:name:ID>.',text:'Переносы строк поддерживаются. Сообщение не пингует участников и роли.'};
   if (parameter.name === 'reset_time') input.placeholder = '03:00';
-  if (parameter.name === 'autotag') input.placeholder = '20:00 или disable';
+  if (parameter.name === 'autotag') input.placeholder = t('20:00 или disable');
   if (parameter.name === 'realm') input.placeholder = 'silvermoon';
   if (parameter.name === 'level') input.placeholder = '10';
   label.append(input);
   if (help[parameter.name]) {
-    const hint = node('span','field-help',help[parameter.name]);
+    const hint = ui('span','field-help',help[parameter.name]);
     hint.id = input.id + '-help'; input.setAttribute('aria-describedby',hint.id); label.append(hint);
   }
   return {label,input,parameter};
@@ -213,36 +224,39 @@ function playerFields() {
   const classLabel = node('label','field'), specLabel = node('label','field');
   const classSelect = node('select'), specSelect = node('select');
   classSelect.required = specSelect.required = true;
-  classSelect.append(option('','Выберите класс'));
-  specSelect.append(option('','Сначала выберите класс'));
+  classSelect.id = 'player-class-' + (++playerCounter);
+  specSelect.id = 'player-spec-' + playerCounter;
+  classSelect.append(option('',t('Выберите класс')));
+  specSelect.append(option('',t('Сначала выберите класс')));
   for (const name of Object.keys(guildData.classes || {})) classSelect.append(option(name,name));
-  classLabel.append(node('span','field-label','Класс'),classSelect);
-  specLabel.append(node('span','field-label','Специализация'),specSelect);
+  classLabel.append(ui('span','field-label','Класс'),classSelect);
+  specLabel.append(ui('span','field-label','Специализация'),specSelect);
   classSelect.addEventListener('change',() => {
-    specSelect.replaceChildren(option('','Выберите специализацию'));
-    for (const [spec,role] of Object.entries(guildData.classes?.[classSelect.value] || {})) specSelect.append(option(spec,`${spec} · ${{tank:'танк',healer:'лекарь',dps:'DPS'}[role] || role}`));
+    specSelect.replaceChildren(option('',t('Выберите специализацию')));
+    for (const [spec,role] of Object.entries(guildData.classes?.[classSelect.value] || {})) specSelect.append(option(spec,`${spec} · ${t({tank:'танк',healer:'лекарь',dps:'DPS'}[role] || role)}`));
   });
   wrapper.append(classLabel,specLabel);
   return {wrapper,classSelect,specSelect};
 }
 function confirmAction(command) {
   if (!destructive[command.name]) return Promise.resolve(true);
-  $('confirm-title').textContent = (commandsText[command.name]?.[0] || command.name) + '?';
-  $('confirm-text').textContent = destructive[command.name];
+  $('confirm-title').textContent = t(commandsText[command.name]?.[0] || command.name) + '?';
+  $('confirm-text').textContent = t(destructive[command.name]);
   $('confirm-dialog').returnValue = 'cancel';
   $('confirm-dialog').showModal();
   return new Promise((resolve) => $('confirm-dialog').addEventListener('close', () => resolve($('confirm-dialog').returnValue === 'confirm'),{once:true}));
 }
 function renderCommand(command) {
   const card = node('article','command-card'), heading = node('div','command-header');
-  heading.append(node('h2','',commandsText[command.name]?.[0] || command.name),node('code','command-name','/' + command.name));
-  card.append(heading,node('p','command-description',commandsText[command.name]?.[1] || command.description));
+  heading.append(ui('h2','',commandsText[command.name]?.[0] || command.name),node('code','command-name','/' + command.name));
+  card.append(heading,ui('p','command-description',commandsText[command.name]?.[1] || command.description));
   const form = node('form','command-form');
+  form.dataset.command = command.name;
   const fields = (command.parameters || []).map((p,i) => buildField(p,command,i));
   for (const {label} of fields) form.append(label);
   let player;
   if (['mplus create','mplus join'].includes(command.name)) { player = playerFields(); form.append(player.wrapper); }
-  const footer = node('div','form-footer'), status = node('p','form-feedback'), button = node('button','button button-small' + (destructive[command.name] ? ' button-secondary' : ''),'Выполнить ↗');
+  const footer = node('div','form-footer'), status = node('p','form-feedback'), button = ui('button','button button-small' + (destructive[command.name] ? ' button-secondary' : ''),'Выполнить ↗');
   button.type = 'submit';
   footer.append(status,button);
   form.append(footer);
@@ -251,7 +265,7 @@ function renderCommand(command) {
     if (loading || executing || !guildData) return;
     const guildId = guildData.guild.id;
     if (command.name === 'cleanup' && !$('context-channel')?.value) {
-      status.className = 'form-feedback error'; status.textContent = 'Выберите канал выполнения перед очисткой.'; return;
+      feedback(status, 'Выберите канал выполнения перед очисткой.', true); return;
     }
     if (!(await confirmAction(command)) || !guildData || guildData.guild.id !== guildId) return;
     const args = {};
@@ -263,15 +277,16 @@ function renderCommand(command) {
     if (player) payload.player = {class_name:player.classSelect.value,spec:player.specSelect.value};
     executing = true; $('guild-select').disabled = true; $('refresh').disabled = true;
     for (const control of $('navigation').querySelectorAll('button')) control.disabled = true;
-    button.disabled = true; status.className = 'form-feedback'; status.textContent = 'Выполняется…';
+    $('language-select').disabled = true;
+    button.disabled = true; feedback(status, 'Выполняется…');
     try {
       const result = await api('/api/guilds/' + encodeURIComponent(guildId) + '/commands',{method:'POST',body:JSON.stringify(payload)});
-      status.textContent = 'Готово';
+      feedback(status, 'Готово');
       renderResults(command,result);
       await loadGuild(guildId, true);
-    } catch (error) { status.className = 'form-feedback error'; status.textContent = error.message; }
+    } catch (error) { feedback(status, error.message, true); }
     finally {
-      executing = false; button.disabled = false; $('guild-select').disabled = false; $('refresh').disabled = false;
+      executing = false; $('language-select').disabled = false; button.disabled = false; $('guild-select').disabled = false; $('refresh').disabled = false;
       for (const control of $('navigation').querySelectorAll('button')) control.disabled = false;
     }
   });
@@ -281,19 +296,20 @@ function renderCommand(command) {
 function renderContext() {
   const toolbar = node('div','context-toolbar');
   const label = node('label','field');
-  label.append(node('span','field-label','Канал выполнения'));
+  label.append(ui('span','field-label','Канал выполнения'));
   const select = node('select'); select.id = 'context-channel';
   channelOptions(select,guildData.state?.channel_id || guildData.channels?.[0]?.id);
   label.append(select);
-  toolbar.append(label,node('p','field-help','Контекст для проверки прав и очистки сообщений. Канал публикации задаётся отдельно в командах настройки.'));
+  toolbar.append(label,ui('p','field-help','Контекст для проверки прав и очистки сообщений. Канал публикации задаётся отдельно в командах настройки.'));
   return toolbar;
 }
 function renderPage() {
   if (!guildData) return;
+  playerCounter = 0;
   renderNavigation();
   $('page-eyebrow').textContent = guildData.guild.name.toUpperCase();
-  $('page-title').textContent = sections[section].title;
-  $('page-description').textContent = sections[section].description;
+  $('page-title').textContent = t(sections[section].title);
+  $('page-description').textContent = t(sections[section].description);
   $('dashboard').hidden = false; $('welcome').hidden = true;
   renderSummary();
   $('overview').hidden = section !== 'overview';
@@ -303,7 +319,7 @@ function renderPage() {
     const commands = (guildData.commands || []).filter((command) => commandSection(command.name) === section);
     const fragment = document.createDocumentFragment();
     const context = renderContext(); context.classList.add('full-width'); fragment.append(context);
-    if (!commands.length) fragment.append(node('p','empty-state','В этом разделе нет доступных вам команд. Права определяются ролью на Discord-сервере.'));
+    if (!commands.length) fragment.append(ui('p','empty-state','В этом разделе нет доступных вам команд. Права определяются ролью на Discord-сервере.'));
     for (const command of commands) fragment.append(renderCommand(command));
     $('command-area').replaceChildren(fragment);
   }
@@ -318,9 +334,9 @@ function addEmbed(container, embed) {
 }
 function renderResults(command,result) {
   const item = node('div','result-item');
-  item.append(node('div','result-command','/' + command.name + ' · ' + new Date().toLocaleTimeString('ru-RU')));
+  item.append(node('div','result-command','/' + command.name + ' · ' + new Date().toLocaleTimeString(dateLocale())));
   const messages = result.messages || [];
-  if (!messages.length) item.append(node('p','result-content','Действие выполнено.'));
+  if (!messages.length) item.append(ui('p','result-content','Действие выполнено.'));
   for (const message of messages) {
     if (message.content) item.append(node('p','result-content',message.content));
     for (const embed of message.embeds || []) addEmbed(item,embed);
@@ -351,7 +367,7 @@ async function start() {
       if (String(identity.user.avatar_url).startsWith('https://cdn.discordapp.com/')) {avatar.src = identity.user.avatar_url; avatar.alt = ''; $('account').append(avatar);}
     }
     $('account').append(node('span','',identity.user.name));
-    const logout = node('button','text-button','Выйти'); logout.type='button';
+    const logout = ui('button','text-button','Выйти'); logout.type='button'; logout.dataset.i18n='Выйти';
     logout.addEventListener('click',async () => {try {await api('/auth/logout',{method:'POST',body:'{}'});window.location.assign('/');} catch(error) {notice(error.message,true);}});
     $('account').append(logout);
     const select = $('guild-select');
@@ -368,6 +384,33 @@ async function start() {
     if (error.message !== 'Войдите через Discord, чтобы продолжить.') notice(error.message,true);
   }
 }
+function changeLanguage(value) {
+  const feedbacks = [...document.querySelectorAll('.command-form')].map((form) => ({
+    command: form.dataset.command, source: form.querySelector('.form-feedback')?.dataset.source,
+    error: form.querySelector('.form-feedback')?.classList.contains('error')
+  }));
+  const drafts = [...document.querySelectorAll('#command-area input, #command-area select, #command-area textarea')]
+    .map((input) => ({id: input.id, value: input.value}));
+  setLanguage(value);
+  applyStatic();
+  if (guildData) {
+    renderPage();
+    for (const {id,value: draft} of drafts) {
+      const input = $(id);
+      if (!input) continue;
+      input.value = draft;
+      if (id.startsWith('player-class-')) input.dispatchEvent(new Event('change'));
+    }
+  }
+  for (const form of document.querySelectorAll('.command-form')) {
+    const saved = feedbacks.find((entry) => entry.command === form.dataset.command);
+    if (saved?.source) feedback(form.querySelector('.form-feedback'), saved.source, saved.error);
+  }
+  if (noticeSource) $('notice').textContent = translateError(noticeSource);
+}
+$('language-select').value = getLanguage();
+$('language-select').addEventListener('change', (event) => {if (!executing) changeLanguage(event.target.value);});
+applyStatic();
 $('refresh').addEventListener('click',() => guildData && loadGuild(guildData.guild.id,true));
 $('clear-results').addEventListener('click',() => {$('results').replaceChildren(); $('results-section').hidden = true;});
 start();

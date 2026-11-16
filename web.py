@@ -89,6 +89,7 @@ class WebPanel:
         self.app.on_response_prepare.append(self.response_headers)
         self.app.add_routes([
             web.get('/', self.index), web.get('/app.js', self.asset), web.get('/style.css', self.asset),
+            web.get('/i18n.js', self.asset),
             web.get('/auth/login', self.login), web.get('/auth/callback', self.callback),
             web.post('/auth/logout', self.logout), web.get('/api/me', self.me),
             web.get('/api/guilds/{guild_id}', self.guild_info),
