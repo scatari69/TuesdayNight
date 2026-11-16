@@ -29,6 +29,7 @@ class DeadlockBot(discord.Client):
         self.dashboard_tasks = {}
         self.dashboard_locks = {}
         self.mplus = mplus.MPlus(self)
+        self.web = None
 
     async def setup_hook(self):
         await self.store.migrate()
@@ -41,11 +42,17 @@ class DeadlockBot(discord.Client):
             await self.tree.sync(guild=guild)
         else:
             await self.tree.sync()
+        if os.getenv('WEB_BASE_URL'):
+            from web import WebPanel
+            self.web = WebPanel(self)
+            await self.web.start()
         self.scheduler.start()
         self.dashboard_scheduler.start()
         self.mplus_scheduler.start()
 
     async def close(self):
+        if self.web is not None:
+            await self.web.close()
         self.scheduler.cancel()
         self.dashboard_scheduler.cancel()
         self.mplus_scheduler.cancel()

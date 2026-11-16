@@ -7,5 +7,12 @@ services:
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       DATA_DIR: /app/data
       TZ: ${TZ:-Europe/Kyiv}
+      WEB_BASE_URL: ${WEB_BASE_URL:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+    ports:
+      - "${WEB_BIND_IP:-127.0.0.1}:${WEB_PORT:-8080}:8080"
     volumes:
       - ./data:/app/data

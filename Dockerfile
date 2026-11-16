@@ -5,4 +5,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -r
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
+COPY web_static ./web_static
 CMD ["python", "bot.py"]
