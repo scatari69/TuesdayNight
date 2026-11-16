@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
@@ -139,6 +139,19 @@ class BotTests(StateFixture):
         self.assertTrue(view.is_persistent())
         self.assertEqual([(button.custom_id, button.label) for button in view.children],
                          [("deadlock:plus", "Joining"), ("deadlock:minus", "Not joining")])
+
+    async def test_commands_sync_globally_even_with_test_guild(self):
+        self.bot.tree.sync = AsyncMock()
+        self.bot.tree.copy_global_to = MagicMock()
+        self.bot.add_view = MagicMock()
+        with patch.dict('os.environ', {'DISCORD_GUILD_ID': '42', 'WEB_BASE_URL': ''}), \
+             patch.object(self.bot.scheduler, 'start'), \
+             patch.object(self.bot.dashboard_scheduler, 'start'), \
+             patch.object(self.bot.mplus_scheduler, 'start'):
+            await self.bot.setup_hook()
+        self.assertEqual(self.bot.tree.sync.await_count, 2)
+        self.assertEqual(self.bot.tree.sync.await_args_list[0].kwargs, {})
+        self.assertEqual(self.bot.tree.sync.await_args_list[1].kwargs['guild'].id, 42)
 
     async def test_roster_tracks_role_changes_without_database(self):
         state = await self.store.read(1)

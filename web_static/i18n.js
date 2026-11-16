@@ -2,6 +2,15 @@
 (() => {
   const translations = Object.freeze({
   "К содержимому": "Skip to content",
+  "Пригласить бота": "Invite bot",
+  "Панель доступна только администраторам сервера Discord.": "The panel is available only to Discord server administrators.",
+  "ДЛЯ АДМИНИСТРАТОРОВ": "ADMIN CONTROL",
+  "Управление доступно только администраторам Discord-сервера.": "Management is available only to Discord server administrators.",
+  "ВАШ СЕРВЕР — СЛЕДУЮЩИЙ": "YOUR SERVER IS NEXT",
+  "Добавим бота на сервер?": "Bring the bot to your server?",
+  "Здесь появятся серверы, где у вас есть право «Администратор» и установлен TuesdayNight. Пригласите бота или войдите другим аккаунтом Discord.": "Servers where you have Administrator permission and TuesdayNight is installed will appear here. Invite the bot or sign in with another Discord account.",
+  "Проверить серверы": "Check servers",
+  "Для доступа к панели нужно право «Администратор».": "Administrator permission is required to access the panel.",
   "Навигация": "Navigation",
   "TuesdayNight, главная": "TuesdayNight home",
   "ПАНЕЛЬ УПРАВЛЕНИЯ": "CONTROL PANEL",

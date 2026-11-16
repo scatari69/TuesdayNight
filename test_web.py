@@ -195,10 +195,67 @@ class WebTests(StateFixture):
         self.assertIsNone(state.get('dashboard'))
         self.member.guild_permissions = discord.Permissions(view_channel=True)
         response = await self.client.get('/api/guilds/1', headers=self.headers)
-        body = await response.json()
-        self.assertNotIn('reaction_roles', body['state'])
-        self.assertNotIn('dashboard', body['state'])
-        self.assertNotIn('reactionrole add', {command['name'] for command in body['commands']})
+        self.assertEqual(response.status, 403)
+        self.assertNotIn('reaction_roles', str(await response.json()))
+
+    async def test_only_administrators_see_guilds_and_live_revocation_blocks_commands(self):
+        payload = {'command': 'settings', 'channel_id': '10', 'arguments': {'cooldown': 120}}
+        response = await self.client.get('/api/me', headers=self.headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual([guild['id'] for guild in (await response.json())['guilds']], ['1'])
+        response = await self.post(payload)
+        self.assertEqual(response.status, 200)
+        fetches_before = self.guild.fetch_member.await_count
+        self.member.guild_permissions = discord.Permissions(view_channel=True, manage_guild=True,
+                                                             manage_roles=True, manage_messages=True)
+        response = await self.client.get('/api/me', headers=self.headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())['guilds'], [])
+        response = await self.client.get('/api/guilds/1', headers=self.headers)
+        self.assertEqual(response.status, 403)
+        response = await self.post({**payload, 'arguments': {'cooldown': 300}})
+        self.assertEqual(response.status, 403)
+        self.assertEqual((await self.store.read(1))['cooldown'], 120)
+        self.assertEqual(self.guild.fetch_member.await_count - fetches_before, 3)
+        self.assertIn(self.sid, self.panel.sessions, 'The existing session must not bypass freshly revoked rights')
+
+    async def test_administrator_permission_is_scoped_to_each_guild(self):
+        other_member = SimpleNamespace(id=7, bot=False, guild_permissions=discord.Permissions(manage_guild=True))
+        other = SimpleNamespace(id=2, name='Other server', icon=None,
+                                fetch_member=AsyncMock(return_value=other_member))
+        self.bot._connection._guilds[2] = other
+        response = await self.client.get('/api/me', headers=self.headers)
+        self.assertEqual([guild['id'] for guild in (await response.json())['guilds']], ['1'])
+        response = await self.client.get('/api/guilds/2', headers=self.headers)
+        self.assertEqual(response.status, 403)
+        response = await self.post({'command': 'clear', 'arguments': {}}, guild_id=2)
+        self.assertEqual(response.status, 403)
+        self.assertIsNone((await self.store.read(2))['role_id'])
+        other.fetch_member.assert_awaited()
+
+    async def test_invite_url_is_public_fixed_and_contains_no_secrets(self):
+        response = await self.client.get('/invite', params={
+            'client_id': '999', 'permissions': '8', 'redirect_uri': 'https://attacker.invalid',
+            'next': 'https://attacker.invalid'}, allow_redirects=False)
+        self.assertEqual(response.status, 302)
+        target = response.headers['Location']
+        url = urlsplit(target)
+        self.assertEqual((url.scheme, url.netloc, url.path), ('https', 'discord.com', '/oauth2/authorize'))
+        query = parse_qs(url.query)
+        self.assertEqual(query['client_id'], ['123'])
+        self.assertEqual(set(query['scope'][0].split()), {'bot', 'applications.commands'})
+        self.assertEqual(query['integration_type'], ['0'])
+        requested = discord.Permissions(int(query['permissions'][0]))
+        expected = discord.Permissions(view_channel=True, send_messages=True, read_message_history=True,
+            embed_links=True, add_reactions=True, manage_roles=True)
+        self.assertEqual(requested.value, expected.value)
+        self.assertFalse(requested.administrator)
+        self.assertNotIn('redirect_uri', query)
+        self.assertNotIn('next', query)
+        for secret in ('test-only-secret', self.sid, self.session['csrf'], 'attacker.invalid'):
+            self.assertNotIn(secret, target)
+        response = await self.client.get('/invite', allow_redirects=False)
+        self.assertEqual(response.headers['Location'], target)
 
     async def test_live_permissions_prevent_admin_command_and_foreign_guild(self):
         self.member.guild_permissions = discord.Permissions.none()
@@ -243,8 +300,7 @@ class WebTests(StateFixture):
                                     'arguments': {'group': '3', 'member': '8'}})
         self.assertEqual(response.status, 404)
 
-    async def test_cleanup_uses_channel_permission_and_delete_only_bot_messages(self):
-        self.member.guild_permissions = discord.Permissions(view_channel=True)
+    async def test_cleanup_requires_administrator_and_deletes_only_bot_messages(self):
         self.channel.permissions_for.return_value = discord.Permissions(view_channel=True, manage_messages=True)
         bot_message = SimpleNamespace(author=SimpleNamespace(id=999), delete=AsyncMock())
         user_message = SimpleNamespace(author=SimpleNamespace(id=7), delete=AsyncMock())
@@ -258,7 +314,7 @@ class WebTests(StateFixture):
         self.assertEqual(response.status, 200)
         bot_message.delete.assert_awaited_once()
         user_message.delete.assert_not_awaited()
-        self.channel.permissions_for.return_value = discord.Permissions(view_channel=True)
+        self.member.guild_permissions = discord.Permissions(view_channel=True, manage_messages=True)
         response = await self.post({'command': 'cleanup', 'channel_id': '10', 'arguments': {}})
         self.assertEqual(response.status, 403)
 

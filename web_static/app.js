@@ -67,6 +67,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     if (response.status === 401) {
       $('welcome').hidden = false;
+      $('empty-guilds').hidden = true;
       $('dashboard').hidden = true;
       $('navigation').hidden = true;
       $('server-picker').hidden = true;
@@ -310,7 +311,7 @@ function renderPage() {
   $('page-eyebrow').textContent = guildData.guild.name.toUpperCase();
   $('page-title').textContent = t(sections[section].title);
   $('page-description').textContent = t(sections[section].description);
-  $('dashboard').hidden = false; $('welcome').hidden = true;
+  $('dashboard').hidden = false; $('welcome').hidden = true; $('empty-guilds').hidden = true;
   renderSummary();
   $('overview').hidden = section !== 'overview';
   $('command-area').hidden = section === 'overview';
@@ -374,7 +375,8 @@ async function start() {
     for (const guild of identity.guilds || []) select.append(option(guild.id,guild.name));
     if (!identity.guilds?.length) {
       $('welcome').hidden = true;
-      notice('Нет доступных серверов. Войдите аккаунтом Discord, который состоит на сервере с ботом.');
+      $('empty-guilds').hidden = false;
+      notice('');
       return;
     }
     $('server-picker').hidden = false;
@@ -411,6 +413,7 @@ function changeLanguage(value) {
 $('language-select').value = getLanguage();
 $('language-select').addEventListener('change', (event) => {if (!executing) changeLanguage(event.target.value);});
 applyStatic();
+$('retry-guilds').addEventListener('click', () => window.location.reload());
 $('refresh').addEventListener('click',() => guildData && loadGuild(guildData.guild.id,true));
 $('clear-results').addEventListener('click',() => {$('results').replaceChildren(); $('results-section').hidden = true;});
 start();

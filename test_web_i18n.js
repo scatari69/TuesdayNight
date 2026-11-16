@@ -80,6 +80,13 @@ for (const match of app.matchAll(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g)) {
   const label = vm.runInNewContext(match[0]);
   assert.ok(Object.hasOwn(translations, label), `Runtime UI label is missing from dictionary: ${label}`);
 }
+assert.match(html, /href="\/invite"/, 'The public bot invitation must use the fixed same-origin endpoint');
+assert.equal(api.t('Пригласить бота'), 'Invite bot');
+assert.equal(api.t('Проверить серверы'), 'Check servers');
+assert.equal(api.t('Панель доступна только администраторам сервера Discord.'),
+             'The panel is available only to Discord server administrators.');
+assert.equal(api.t('Управление доступно только администраторам Discord-сервера.'),
+             'Management is available only to Discord server administrators.');
 for (const userText of ['Гильдия <script>alert(1)</script>', 'Warrior / Protection', 'Мой сервер №42']) {
   assert.equal(api.t(userText), userText, 'Unknown user text must not be translated or modified');
 }

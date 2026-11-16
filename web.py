@@ -90,6 +90,7 @@ class WebPanel:
         self.app.add_routes([
             web.get('/', self.index), web.get('/app.js', self.asset), web.get('/style.css', self.asset),
             web.get('/i18n.js', self.asset),
+            web.get('/invite', self.invite),
             web.get('/auth/login', self.login), web.get('/auth/callback', self.callback),
             web.post('/auth/logout', self.logout), web.get('/api/me', self.me),
             web.get('/api/guilds/{guild_id}', self.guild_info),
@@ -207,6 +208,18 @@ class WebPanel:
                             samesite='Lax', path='/auth')
         return response
 
+    async def invite(self, request):
+        if not self.client_id:
+            raise web.HTTPServiceUnavailable(reason='Веб-панель не настроена.')
+        client_id = str(snowflake(self.client_id))
+        permissions = discord.Permissions(view_channel=True, send_messages=True, read_message_history=True,
+                                           embed_links=True, add_reactions=True, manage_roles=True)
+        url = 'https://discord.com/oauth2/authorize?' + urlencode({
+            'client_id': client_id, 'scope': 'bot applications.commands',
+            'permissions': permissions.value, 'integration_type': 0,
+        })
+        return web.Response(status=302, headers={'Location': url})
+
     async def callback(self, request):
         state = request.query.get('state', '')
         cookie = request.cookies.get('tn_oauth', '')
@@ -254,6 +267,8 @@ class WebPanel:
             raise web.HTTPForbidden(reason='Вы не состоите в этом сервере.') from None
         if member.bot:
             raise web.HTTPForbidden(reason='Боты не могут пользоваться панелью.')
+        if not member.guild_permissions.administrator:
+            raise web.HTTPForbidden(reason='Панель доступна только администраторам сервера Discord.')
         return member
 
     async def context(self, request):
@@ -381,6 +396,8 @@ class WebPanel:
         return result
 
     async def execute(self, guild, member, payload):
+        if not member.guild_permissions.administrator:
+            raise web.HTTPForbidden(reason='Панель доступна только администраторам сервера Discord.')
         if not isinstance(payload, dict) or set(payload) - {'command', 'channel_id', 'arguments', 'player'}:
             raise ValueError('Некорректный запрос команды.')
         name = payload.get('command')

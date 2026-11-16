@@ -36,12 +36,11 @@ class DeadlockBot(discord.Client):
         self.add_view(GatheringView())
         self.add_view(mplus.GroupView())
         guild_id = os.getenv("DISCORD_GUILD_ID")
+        await self.tree.sync()
         if guild_id:
             guild = discord.Object(id=int(guild_id))
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-        else:
-            await self.tree.sync()
         if os.getenv('WEB_BASE_URL'):
             from web import WebPanel
             self.web = WebPanel(self)
